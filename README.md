@@ -1,6 +1,6 @@
-# Gradio Groq Basics: Building Blocks for Multi-Modal Gradio Powered by Groq Apps
+# Building Blocks for Multi-Modal Apps Powered by Gradio and Groq
 
-[Video Demo]()
+[Video Demo](https://github.com/user-attachments/assets/0ab0f71a-4b0a-4d58-ae79-02573aa8a21d)
 
 This repository includes an application showing how to build fast multi-modal apps on Gradio powered by Groq. Specifically, it uses Whisper and Llama-3.2-vision to enable voice to text to LLM response, image to text, and traditional chat.
 
