@@ -1,0 +1,4 @@
+gradio
+groq
+numpy
+soundfile
