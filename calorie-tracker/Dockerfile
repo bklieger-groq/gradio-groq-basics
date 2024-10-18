@@ -5,7 +5,7 @@ FROM python:3.9-slim
 WORKDIR /workspace
 
 # Copy the parent directory contents into the container at /workspace
-COPY .. /workspace
+COPY . /workspace
 
 # Install any needed packages specified in requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
@@ -14,4 +14,4 @@ RUN pip install --no-cache-dir -r requirements.txt
 EXPOSE 7860
 
 # Run app.py when the container launches
-CMD ["python", "calorie-tracker/app.py"]
+CMD ["python", "app.py"]
