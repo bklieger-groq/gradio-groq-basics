@@ -10,8 +10,8 @@ RUN apt-get update && apt-get install -y \
     libportaudio2 \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy the parent directory contents into the container at /workspace
-COPY .. /workspace
+# Copy the directory contents into the container at /workspace
+COPY . /workspace
 
 # Install any needed packages specified in requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
