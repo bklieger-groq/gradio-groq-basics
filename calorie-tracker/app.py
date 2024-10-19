@@ -173,4 +173,4 @@ with gr.Blocks(css=custom_css) as demo:
     - Continue the conversation as desired.
     """)
 
-demo.launch(debug=False, server_name="0.0.0.0", share=True)
+demo.launch(debug=False, server_name="0.0.0.0")
