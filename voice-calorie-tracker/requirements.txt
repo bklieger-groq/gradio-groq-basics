@@ -1,0 +1,8 @@
+gradio
+groq
+numpy
+soundfile
+librosa
+spaces
+xxhash
+datasets
