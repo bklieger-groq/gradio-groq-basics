@@ -6,3 +6,4 @@ librosa
 spaces
 xxhash
 datasets
+gradio_webrtc[vad]==0.0.9a1pip3

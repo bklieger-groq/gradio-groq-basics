@@ -13,6 +13,12 @@ import librosa
 import spaces
 import xxhash
 from datasets import Audio
+import json
+import base64
+from gradio_webrtc import WebRTC
+
+# Instruction (This is what customizes the app to be a calorie tracker)
+SYS_PROMPT = "In conversation with the user, ask questions to estimate and provide (1) total calories, (2) protein, carbs, and fat in grams, (3) fiber and sugar content. Only ask *one question at a time*. Be conversational and natural."
 
 # Initialize Groq client
 api_key = os.environ.get("GROQ_API_KEY")
@@ -21,11 +27,25 @@ if not api_key or not cartesia_api_key:
     raise ValueError("Please set both GROQ_API_KEY and CARTESIA_API_KEY environment variables.")
 client = groq.Client(api_key=api_key)
 
-async def text_to_speech(text: str) -> tuple[int, np.ndarray]:
-    """Convert text to speech using Cartesia AI API"""
+def parse_sse_event(event_str):
+    event = {}
+    for line in event_str.splitlines():
+        if line.startswith(':'):
+            continue  # Ignore comments
+        if ':' in line:
+            key, value = line.split(':', 1)
+            value = value.lstrip()
+            if key in event:
+                event[key] += '\n' + value
+            else:
+                event[key] = value
+    return event
+
+async def text_to_speech_stream(text: str):
+    """Stream audio chunks using Cartesia AI's streaming TTS API."""
     async with aiohttp.ClientSession() as session:
         async with session.post(
-            "https://api.cartesia.ai/tts/bytes",
+            "https://api.cartesia.ai/tts/sse",
             headers={
                 "Cartesia-Version": "2024-06-30",
                 "Content-Type": "application/json",
@@ -47,10 +67,33 @@ async def text_to_speech(text: str) -> tuple[int, np.ndarray]:
         ) as response:
             if response.status != 200:
                 raise Exception(f"TTS API error: {await response.text()}")
-            
-            audio_bytes = await response.read()
-            audio_array = np.frombuffer(audio_bytes, dtype=np.float32)
-            return 24000, audio_array
+
+            buffer = ''
+            sample_rate = 24000
+            async for chunk, _ in response.content.iter_chunks():
+                chunk_text = chunk.decode('utf-8')
+                buffer += chunk_text
+                while '\n\n' in buffer:
+                    event_str, buffer = buffer.split('\n\n', 1)
+                    event = parse_sse_event(event_str)
+                    if 'data' in event:
+                        data_str = event['data']
+                        try:
+                            data_json = json.loads(data_str)
+                            if data_json.get('type') == 'chunk':
+                                # Decode base64 audio data
+                                chunk_data_base64 = data_json.get('data')
+                                chunk_audio_bytes = base64.b64decode(chunk_data_base64)
+                                # Convert to NumPy array
+                                audio_array = np.frombuffer(chunk_audio_bytes, dtype=np.float32)
+                                # Yield the audio chunk
+                                yield sample_rate, audio_array
+                            if data_json.get('done'):
+                                # Streaming is complete
+                                return
+                        except Exception as e:
+                            print(f"Error parsing data: {e}")
+                            continue
 
 def process_whisper_response(completion):
     """Process Whisper transcription response and return text or null based on no_speech_prob"""
@@ -89,7 +132,7 @@ def generate_chat_completion(client, history):
     messages.append(
         {
             "role": "system",
-            "content": "In conversation with the user, ask questions to estimate and provide (1) total calories, (2) protein, carbs, and fat in grams, (3) fiber and sugar content. Only ask *one question at a time*. Be conversational and natural.",
+            "content": SYS_PROMPT,
         }
     )
 
@@ -117,9 +160,10 @@ def process_audio(audio: tuple, state: AppState):
     return audio, state
 
 @spaces.GPU(duration=40, progress=gr.Progress(track_tqdm=True))
-def response(state: AppState, audio: tuple):
+async def response(state: AppState, audio: tuple):
     if not audio:
-        return AppState()
+        yield state, state.conversation, None
+        return
 
     file_name = f"/tmp/{xxhash.xxh32(bytes(audio[1])).hexdigest()}.wav"
     sf.write(file_name, audio[1], audio[0], format="wav")
@@ -136,21 +180,26 @@ def response(state: AppState, audio: tuple):
         # Generate assistant response
         assistant_message = generate_chat_completion(client, state.conversation)
 
-        # Convert assistant's response to speech
-        try:
-            sample_rate, audio_array = asyncio.run(text_to_speech(assistant_message))
-            state.last_audio_response = (sample_rate, audio_array)
-        except Exception as e:
-            print(f"Error in TTS: {e}")
-            state.last_audio_response = None
-
         # Append assistant's message
         state.conversation.append({"role": "assistant", "content": assistant_message})
-        
+
+        # Update the conversation
+        yield state, state.conversation, None  # Update chatbot without audio
+
+        # Stream TTS audio through WebRTC
+        try:
+            audio_generator = text_to_speech_stream(assistant_message)
+            async for audio_chunk in audio_generator:
+                # Yield the raw audio bytes to the output_audio component
+                yield state, state.conversation, audio_chunk
+        except Exception as e:
+            print(f"Error in TTS: {e}")
+            yield state, state.conversation, None
+
         print(state.conversation)
         os.remove(file_name)
-
-    return state, state.conversation, state.last_audio_response
+    else:
+        yield state, state.conversation, None
 
 def start_recording_user(state: AppState):
     return None
@@ -219,6 +268,7 @@ js_reset = """
 }
 """
 
+# Modify the output_audio component to use WebRTC
 with gr.Blocks(theme=theme, js=js) as demo:
     with gr.Row():
         input_audio = gr.Audio(
@@ -231,13 +281,12 @@ with gr.Blocks(theme=theme, js=js) as demo:
     with gr.Row():
         chatbot = gr.Chatbot(label="Conversation", type="messages")
     with gr.Row():
-        output_audio = gr.Audio(
+        output_audio = gr.WebRTC(
             label="AI Response",
-            type="numpy",
-            autoplay=True,
-            visible=True,
+            mode="recvonly",  # Only receiving audio from the server
+            media_stream_constraints={"audio": True, "video": False},
         )
-        
+
     state = gr.State(value=AppState())
     stream = input_audio.start_recording(
         process_audio,
@@ -260,4 +309,4 @@ with gr.Blocks(theme=theme, js=js) as demo:
     )
 
 if __name__ == "__main__":
-    demo.launch()
+    demo.queue().launch()
