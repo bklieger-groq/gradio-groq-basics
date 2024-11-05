@@ -1,5 +1,6 @@
 # Building a Voice-Enabled Calorie Tracking App with Groq and Gradio
 > Learn how to create a multi-modal Gradio and Groq app that has automatic speech detection.
+> Credits: VAD and Gradio code inspired by [WillHeld's Diva-audio-chat](https://huggingface.co/spaces/WillHeld/diva-audio-chat/tree/main).
 
 ## Motivation
 
